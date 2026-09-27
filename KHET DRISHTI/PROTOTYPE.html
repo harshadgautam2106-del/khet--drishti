@@ -1,0 +1,1281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+<title>Khet Drishti — From Satellite to Soil</title>
+<meta name="description" content="AI + Geospatial + Space Technology crop monitoring and early-warning platform for farmers." />
+
+<!-- Tailwind (CDN, JIT) -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- React 18 -->
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+
+<!-- Shim: lucide-react's UMD build reads window.react (lowercase); React's own UMD
+     build only sets window.React. Without this line every icon import is undefined
+     and the app crashes on first render (blank screen, no visible error). -->
+<script>window.react = window.React;</script>
+
+<!-- Recharts (charts). Its UMD build depends on react-is being loaded first,
+     otherwise window.Recharts is never populated. -->
+<script src="https://unpkg.com/prop-types@15/prop-types.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-is@18/umd/react-is.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js" crossorigin></script>
+
+<!-- Lucide icons (React bindings, UMD) -->
+<script src="https://unpkg.com/lucide-react@0.436.0/dist/umd/lucide-react.js" crossorigin></script>
+
+<!-- Babel standalone: lets the browser run the JSX below directly -->
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js" crossorigin></script>
+
+<style>
+  html, body { background:#EEF2ED; margin:0; padding:0; }
+  #root { min-height:100vh; }
+  .no-scrollbar::-webkit-scrollbar{display:none}
+  .no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}
+  * { font-family: 'Inter', sans-serif; }
+  #kd-boot { position:fixed; inset:0; background:#14213D; display:flex; align-items:center; justify-content:center; z-index:9999; color:#9FB0A2; font-family: monospace; font-size:12px; letter-spacing:.08em; }
+  #kd-error { display:none; position:fixed; inset:0; background:#14213D; color:#F7DAD3; z-index:10000; padding:24px; font-family: monospace; font-size:13px; white-space:pre-wrap; overflow:auto; }
+</style>
+</head>
+<body>
+<div id="kd-boot">LOADING KHET DRISHTI…</div>
+<div id="kd-error"></div>
+<div id="root"></div>
+
+<script>
+  // Surface any load-time error on screen instead of a silent blank page.
+  window.addEventListener('error', function (e) {
+    var box = document.getElementById('kd-error');
+    var boot = document.getElementById('kd-boot');
+    if (boot) boot.remove();
+    if (box) {
+      box.style.display = 'block';
+      box.textContent = 'Khet Drishti failed to load.\n\n' + (e.error && e.error.stack ? e.error.stack : e.message) +
+        '\n\nThis is usually a CDN script that did not load (check your internet connection and try reloading).';
+    }
+  });
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useMemo, useEffect, useRef, Fragment } = React;
+const {
+  Satellite, Droplet, Bug, CloudRain, MapPin, Camera, Bell, Settings, Home,
+  Sprout, Plane, FileText, Wifi, WifiOff, ChevronRight, Check, AlertTriangle,
+  Thermometer, Leaf, Shield, User, Globe, Mic, Volume2, Download, Plus, X,
+  ArrowLeft, Sun, Wind, Droplets, RefreshCw, Radio, Eye, Clock, ChevronDown,
+  MapPinned, Loader2, CircleCheck, TriangleAlert, CloudSun, Navigation,
+  ClipboardList, ScanLine
+} = LucideReact;
+const {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, LineChart, Line
+} = Recharts;
+
+
+/* ---------------------------------------------------------
+   KHET DRISHTI — "From Satellite to Soil"
+   Token system:
+   Indigo Night   #14213D  (satellite / header / dark surfaces)
+   Canopy Green   #2C5F3D  (primary brand, healthy crop)
+   Sprout Green   #6FA96B  (secondary green, success)
+   Wheat Gold     #E3A23C  (stage-1 warning, accents)
+   Rust Soil      #A15C3E  (soil-dry stage marker, used sparingly)
+   Alert Red      #C1442D  (critical stress / pest)
+   Sky Mist       #EEF2ED  (light background)
+   Paper          #FBFAF6  (card surface)
+   Fonts: Space Grotesk (display), Inter (body), JetBrains Mono (data/coords)
+----------------------------------------------------------*/
+
+const STR = {
+  en: {
+    appName: "Khet Drishti",
+    tagline: "From Satellite to Soil",
+    subtag: "Detect Early. Alert Quickly. Act Before the Loss.",
+    getStarted: "Get Started",
+    login: "Log in with mobile number",
+    mobile: "Mobile number",
+    sendOtp: "Send OTP",
+    farmerName: "Your name",
+    village: "Village / District",
+    continue: "Continue",
+    setupTitle: "Set up your farm",
+    farmName: "Farm name",
+    cropType: "Main crop",
+    farmArea: "Area (acres)",
+    drawBoundary: "Farm boundary detected from GPS",
+    finishSetup: "Save & go to dashboard",
+    dashboard: "Dashboard", map: "Farm Map", irrigation: "Irrigation",
+    pest: "Pest & Disease", weather: "Weather", satellite: "Satellite",
+    drone: "Drone", damage: "Damage & Insurance", alerts: "Alerts",
+    profile: "Profile", checkField: "Check Field", requestDrone: "Request Drone",
+    uploadPhoto: "Upload Photo", greeting: "Namaste",
+    overallHealth: "Overall Crop Health", stressLevel: "Stress Level",
+    affectedArea: "Affected Area", lastUpdate: "Last Satellite Pass",
+    stage1: "Soil Drying", stage2: "Plant Heating", stage3: "Visible Leaf Decline",
+    healthy: "Healthy", simulated: "Simulated demo data",
+  },
+  hi: {
+    appName: "खेत दृष्टि",
+    tagline: "उपग्रह से मिट्टी तक",
+    subtag: "जल्दी पहचानें। तुरंत सूचित करें। नुकसान से पहले कार्रवाई करें।",
+    getStarted: "शुरू करें",
+    login: "मोबाइल नंबर से लॉग इन करें",
+    mobile: "मोबाइल नंबर",
+    sendOtp: "OTP भेजें",
+    farmerName: "आपका नाम",
+    village: "गाँव / जिला",
+    continue: "आगे बढ़ें",
+    setupTitle: "अपना खेत सेट करें",
+    farmName: "खेत का नाम",
+    cropType: "मुख्य फसल",
+    farmArea: "क्षेत्रफल (एकड़)",
+    drawBoundary: "जीपीएस से खेत की सीमा मिल गई",
+    finishSetup: "सहेजें और डैशबोर्ड पर जाएँ",
+    dashboard: "डैशबोर्ड", map: "खेत का नक्शा", irrigation: "सिंचाई",
+    pest: "कीट व रोग", weather: "मौसम", satellite: "उपग्रह",
+    drone: "ड्रोन", damage: "नुकसान व बीमा", alerts: "अलर्ट",
+    profile: "प्रोफ़ाइल", checkField: "खेत जांचें", requestDrone: "ड्रोन बुलाएं",
+    uploadPhoto: "फोटो अपलोड करें", greeting: "नमस्ते",
+    overallHealth: "कुल फसल स्वास्थ्य", stressLevel: "तनाव स्तर",
+    affectedArea: "प्रभावित क्षेत्र", lastUpdate: "अंतिम उपग्रह पास",
+    stage1: "मिट्टी सूखना", stage2: "पौधा गर्म होना", stage3: "पत्ती में गिरावट",
+    healthy: "स्वस्थ", simulated: "अनुरूपित डेमो डेटा",
+  },
+};
+
+/* ---------- seeded RNG so the demo is stable across renders ---------- */
+function mulberry32(seed) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function useFonts() {
+  useEffect(() => {
+    const id = "kd-fonts";
+    if (document.getElementById(id)) return;
+    const link = document.createElement("link");
+    link.id = id;
+    link.rel = "stylesheet";
+    link.href =
+      "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap";
+    document.head.appendChild(link);
+  }, []);
+}
+
+/* ---------- mock field grid ---------- */
+const COLS = 12, ROWS = 8;
+function genField(seed) {
+  const rnd = mulberry32(seed);
+  const cells = [];
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const v = rnd();
+      let stage = 0; // 0 healthy
+      if (v > 0.93) stage = 3;
+      else if (v > 0.83) stage = 2;
+      else if (v > 0.68) stage = 1;
+      const ndvi = stage === 0 ? 0.68 + rnd() * 0.18 : stage === 1 ? 0.5 + rnd() * 0.12 : stage === 2 ? 0.34 + rnd() * 0.12 : 0.15 + rnd() * 0.12;
+      const moisture = stage === 0 ? 55 + rnd() * 20 : stage === 1 ? 30 + rnd() * 12 : stage === 2 ? 18 + rnd() * 10 : 8 + rnd() * 8;
+      const canopyTemp = stage === 0 ? 27 + rnd() * 2 : stage === 1 ? 29 + rnd() * 2 : stage === 2 ? 32 + rnd() * 2.5 : 35 + rnd() * 2;
+      cells.push({
+        id: `${r}-${c}`, r, c, stage, ndvi: +ndvi.toFixed(2),
+        moisture: +moisture.toFixed(0), canopyTemp: +canopyTemp.toFixed(1),
+        flagged: stage >= 2 && rnd() > 0.4,
+        lat: (23.2599 + r * 0.00042).toFixed(5),
+        lng: (77.4126 + c * 0.00038).toFixed(5),
+      });
+    }
+  }
+  return cells;
+}
+
+const STAGE_META = [
+  { key: 0, label: "Healthy", color: "#6FA96B", light: "#E4F1E1" },
+  { key: 1, label: "Stage 1 · Soil Drying", color: "#E3A23C", light: "#FBEED9" },
+  { key: 2, label: "Stage 2 · Plant Heating", color: "#D97C3B", light: "#FBE1CE" },
+  { key: 3, label: "Stage 3 · Leaf Decline", color: "#C1442D", light: "#F7DAD3" },
+];
+
+const ndviTrend = (() => {
+  const rnd = mulberry32(7);
+  let base = 0.72;
+  return Array.from({ length: 14 }).map((_, i) => {
+    base += (rnd() - 0.58) * 0.03;
+    base = Math.max(0.3, Math.min(0.82, base));
+    return { day: `D${i + 1}`, ndvi: +base.toFixed(2), moisture: +(base * 70 + rnd() * 6).toFixed(0) };
+  });
+})();
+
+const rainfallData = [
+  { day: "Mon", mm: 0 }, { day: "Tue", mm: 2 }, { day: "Wed", mm: 0 },
+  { day: "Thu", mm: 14 }, { day: "Fri", mm: 6 }, { day: "Sat", mm: 0 }, { day: "Sun", mm: 0 },
+];
+
+const initialAlerts = [
+  { id: 1, type: "stress", severity: "critical", title: "Crop Stress Detected", en: "Your field shows signs of water stress in Zone C4. Please inspect and consider irrigation.", hi: "आपके खेत के ज़ोन C4 में जल तनाव के संकेत हैं। कृपया जांच करें और सिंचाई पर विचार करें।", time: "2 hours ago", read: false },
+  { id: 2, type: "pest", severity: "warning", title: "High Pest-Risk Conditions", en: "Humidity and temperature favour pest activity this week. Please inspect your crop.", hi: "इस सप्ताह नमी और तापमान कीट गतिविधि के अनुकूल हैं। कृपया अपनी फसल की जांच करें।", time: "6 hours ago", read: false },
+  { id: 3, type: "irrigation", severity: "info", title: "Rain Expected — Delay Irrigation", en: "14mm rainfall expected Thursday. Irrigation can possibly be delayed by 2 days.", hi: "गुरुवार को 14 मिमी वर्षा की संभावना है। सिंचाई 2 दिन के लिए टाली जा सकती है।", time: "1 day ago", read: true },
+  { id: 4, type: "weather", severity: "warning", title: "Strong Wind Advisory", en: "Wind speeds above 35 km/h expected tomorrow afternoon. Secure loose structures.", hi: "कल दोपहर 35 किमी/घंटा से अधिक हवा की संभावना है। ढीली संरचनाएँ सुरक्षित करें।", time: "1 day ago", read: true },
+  { id: 5, type: "stress", severity: "info", title: "Stage 1 Warning — Early Detection", en: "Soil-moisture decline detected in Zone B2. Earliest warning stage — monitor closely.", hi: "ज़ोन B2 में मिट्टी की नमी में कमी पाई गई। यह सबसे प्रारंभिक चेतावनी चरण है।", time: "2 days ago", read: true },
+];
+
+/* ================= small UI atoms ================= */
+function Pill({ children, tone = "neutral", className = "" }) {
+  const tones = {
+    neutral: "bg-[#EEF2ED] text-[#3A4A3D]",
+    green: "bg-[#E4F1E1] text-[#2C5F3D]",
+    gold: "bg-[#FBEED9] text-[#8A5A18]",
+    orange: "bg-[#FBE1CE] text-[#8A4415]",
+    red: "bg-[#F7DAD3] text-[#8E2A18]",
+    dark: "bg-[#14213D] text-white",
+  };
+  return <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide ${tones[tone]} ${className}`}>{children}</span>;
+}
+
+function Card({ children, className = "", ...rest }) {
+  return (
+    <div className={`bg-[#FBFAF6] border border-[#E4E2D6] rounded-2xl shadow-[0_1px_2px_rgba(20,33,61,0.04)] ${className}`} {...rest}>
+      {children}
+    </div>
+  );
+}
+
+function SectionTitle({ eyebrow, title, action }) {
+  return (
+    <div className="flex items-end justify-between mb-3">
+      <div>
+        {eyebrow && <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-[#7C8A7E] mb-1">{eyebrow}</div>}
+        <h2 className="font-['Space_Grotesk'] text-[19px] font-semibold text-[#14213D]">{title}</h2>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function Gauge({ value, size = 92, stroke = 9, color = "#2C5F3D", label, sub }) {
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const off = c - (value / 100) * c;
+  return (
+    <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} stroke="#E4E2D6" strokeWidth={stroke} fill="none" />
+        <circle cx={size / 2} cy={size / 2} r={r} stroke={color} strokeWidth={stroke} fill="none"
+          strokeDasharray={c} strokeDashoffset={off} strokeLinecap="round"
+          style={{ transition: "stroke-dashoffset 900ms cubic-bezier(.4,0,.2,1)" }} />
+      </svg>
+      <div className="absolute flex flex-col items-center">
+        <span className="font-['Space_Grotesk'] text-[20px] font-bold text-[#14213D] leading-none">{value}%</span>
+        {sub && <span className="text-[10px] text-[#7C8A7E] mt-0.5">{sub}</span>}
+      </div>
+    </div>
+  );
+}
+
+function StageTrack({ current = 0, t }) {
+  const stages = [
+    { n: 1, label: t.stage1, icon: Droplets },
+    { n: 2, label: t.stage2, icon: Thermometer },
+    { n: 3, label: t.stage3, icon: Leaf },
+  ];
+  return (
+    <div className="flex items-center">
+      {stages.map((s, i) => {
+        const active = current >= s.n;
+        const isCurrent = current === s.n;
+        const Icon = s.icon;
+        return (
+          <React.Fragment key={s.n}>
+            <div className="flex flex-col items-center gap-1.5 w-20">
+              <div className={`w-9 h-9 rounded-full flex items-center justify-center border-2 transition-colors
+                ${active ? (isCurrent ? "bg-[#E3A23C] border-[#E3A23C]" : "bg-[#2C5F3D] border-[#2C5F3D]") : "bg-white border-[#D8D5C4]"}`}>
+                <Icon size={16} className={active ? "text-white" : "text-[#9CA79E]"} />
+              </div>
+              <span className={`text-[10px] text-center leading-tight font-medium ${active ? "text-[#14213D]" : "text-[#9CA79E]"}`}>{s.label}</span>
+            </div>
+            {i < stages.length - 1 && (
+              <div className={`h-[2px] flex-1 -mt-5 ${current > s.n ? "bg-[#2C5F3D]" : "bg-[#D8D5C4]"}`} />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
+function EmptyBanner({ icon: Icon = ScanLine, title, sub }) {
+  return (
+    <div className="flex flex-col items-center justify-center text-center py-10 px-6 text-[#7C8A7E]">
+      <Icon size={30} className="mb-2 opacity-60" />
+      <div className="font-medium text-[#3A4A3D]">{title}</div>
+      {sub && <div className="text-[13px] mt-1 max-w-xs">{sub}</div>}
+    </div>
+  );
+}
+
+/* ================= Field Map (signature interactive element) ================= */
+function FieldMap({ field, onSelect, selectedId, compact = false }) {
+  const cellSize = compact ? 20 : 28;
+  const gap = 2;
+  const w = COLS * (cellSize + gap);
+  const h = ROWS * (cellSize + gap);
+  return (
+    <div className="relative overflow-x-auto">
+      <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ maxWidth: w }} className="select-none">
+        {field.map((cell) => {
+          const meta = STAGE_META[cell.stage];
+          const x = cell.c * (cellSize + gap);
+          const y = cell.r * (cellSize + gap);
+          const isSel = selectedId === cell.id;
+          return (
+            <g key={cell.id} onClick={() => onSelect(cell)} className="cursor-pointer">
+              <rect x={x} y={y} width={cellSize} height={cellSize} rx={5}
+                fill={meta.color} opacity={isSel ? 1 : 0.88}
+                stroke={isSel ? "#14213D" : cell.flagged ? "#2760C6" : "transparent"}
+                strokeWidth={isSel ? 2.5 : cell.flagged ? 2 : 0} />
+              {cell.flagged && !isSel && (
+                <circle cx={x + cellSize - 5} cy={y + 5} r={3} fill="#2760C6" />
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+/* ================= Splash ================= */
+function Splash({ onStart, t }) {
+  return (
+    <div className="min-h-screen bg-[#14213D] flex flex-col items-center justify-center relative overflow-hidden px-6">
+      <style>{`
+        @keyframes kd-sweep { 0% { transform: translateX(-120%);} 100% { transform: translateX(220%);} }
+        @keyframes kd-fade-up { 0% { opacity:0; transform: translateY(14px);} 100% { opacity:1; transform: translateY(0);} }
+      `}</style>
+      <div className="absolute inset-0 opacity-[0.06]" style={{
+        backgroundImage: "radial-gradient(circle, #FBFAF6 1px, transparent 1px)", backgroundSize: "26px 26px"
+      }} />
+      <div className="absolute top-0 left-0 w-full h-[2px] overflow-hidden">
+        <div className="h-full w-1/3 bg-gradient-to-r from-transparent via-[#6FA96B] to-transparent" style={{ animation: "kd-sweep 3.2s linear infinite" }} />
+      </div>
+      <div className="relative flex flex-col items-center" style={{ animation: "kd-fade-up 700ms ease-out" }}>
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#2C5F3D] to-[#6FA96B] flex items-center justify-center mb-6 shadow-lg">
+          <Sprout size={30} className="text-white" />
+        </div>
+        <h1 className="font-['Space_Grotesk'] text-[34px] font-bold text-white tracking-tight">{t.appName}</h1>
+        <p className="text-[#9FB0A2] font-mono text-[12px] tracking-[0.18em] uppercase mt-2">{t.tagline}</p>
+        <p className="text-[#C7CFC9] text-[14px] mt-6 max-w-xs text-center leading-relaxed">{t.subtag}</p>
+        <button onClick={onStart}
+          className="mt-9 bg-[#E3A23C] hover:bg-[#d6922c] transition-colors text-[#14213D] font-semibold px-8 py-3.5 rounded-full flex items-center gap-2 shadow-[0_8px_24px_rgba(227,162,60,0.35)]">
+          {t.getStarted} <ChevronRight size={18} />
+        </button>
+      </div>
+      <div className="absolute bottom-6 flex items-center gap-2 text-[#5C6B78] text-[11px] font-mono">
+        <Satellite size={12} /> ISRO Bhuvan · Resourcesat · Sentinel-2
+      </div>
+    </div>
+  );
+}
+
+/* ================= Login ================= */
+function Login({ onDone, t }) {
+  const [mobile, setMobile] = useState("");
+  const [name, setName] = useState("");
+  const [village, setVillage] = useState("");
+  const [step, setStep] = useState(1);
+  return (
+    <div className="min-h-screen bg-[#EEF2ED] flex flex-col justify-center px-6 py-10">
+      <div className="max-w-sm mx-auto w-full">
+        <div className="flex items-center gap-2 mb-8">
+          <div className="w-9 h-9 rounded-xl bg-[#2C5F3D] flex items-center justify-center"><Sprout size={18} className="text-white" /></div>
+          <span className="font-['Space_Grotesk'] font-bold text-[#14213D] text-lg">{t.appName}</span>
+        </div>
+        <Card className="p-6">
+          {step === 1 ? (
+            <>
+              <h2 className="font-['Space_Grotesk'] text-lg font-semibold text-[#14213D] mb-1">{t.login}</h2>
+              <p className="text-[13px] text-[#7C8A7E] mb-5">{t.subtag}</p>
+              <label className="text-[12px] font-medium text-[#3A4A3D]">{t.mobile}</label>
+              <div className="flex items-center gap-2 mt-1.5 mb-5 border border-[#D8D5C4] rounded-xl px-3 py-2.5 bg-white">
+                <span className="text-[#7C8A7E] font-mono text-sm">+91</span>
+                <input value={mobile} onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                  placeholder="98xxxxxxxx" className="flex-1 outline-none text-sm font-mono" />
+              </div>
+              <button disabled={mobile.length < 10} onClick={() => setStep(2)}
+                className="w-full bg-[#2C5F3D] disabled:opacity-40 text-white font-semibold py-3 rounded-xl flex items-center justify-center gap-2">
+                {t.sendOtp} <ChevronRight size={16} />
+              </button>
+            </>
+          ) : (
+            <>
+              <h2 className="font-['Space_Grotesk'] text-lg font-semibold text-[#14213D] mb-4">{t.farmerName}</h2>
+              <label className="text-[12px] font-medium text-[#3A4A3D]">{t.farmerName}</label>
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ramesh Patel"
+                className="w-full mt-1.5 mb-4 border border-[#D8D5C4] rounded-xl px-3 py-2.5 bg-white outline-none text-sm" />
+              <label className="text-[12px] font-medium text-[#3A4A3D]">{t.village}</label>
+              <input value={village} onChange={(e) => setVillage(e.target.value)} placeholder="Bhopal, Madhya Pradesh"
+                className="w-full mt-1.5 mb-6 border border-[#D8D5C4] rounded-xl px-3 py-2.5 bg-white outline-none text-sm" />
+              <button disabled={!name || !village} onClick={() => onDone({ name, village, mobile })}
+                className="w-full bg-[#2C5F3D] disabled:opacity-40 text-white font-semibold py-3 rounded-xl flex items-center justify-center gap-2">
+                {t.continue} <ChevronRight size={16} />
+              </button>
+            </>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+/* ================= Farm Setup ================= */
+function FarmSetup({ onDone, t }) {
+  const [farmName, setFarmName] = useState("");
+  const [crop, setCrop] = useState("Wheat");
+  const [area, setArea] = useState("2.5");
+  const crops = ["Wheat", "Soybean", "Cotton", "Rice", "Chickpea", "Sugarcane"];
+  return (
+    <div className="min-h-screen bg-[#EEF2ED] flex flex-col justify-center px-6 py-10">
+      <div className="max-w-sm mx-auto w-full">
+        <h2 className="font-['Space_Grotesk'] text-xl font-semibold text-[#14213D] mb-1">{t.setupTitle}</h2>
+        <p className="text-[13px] text-[#7C8A7E] mb-5">Step 1 of 1 · GPS auto-detects your boundary</p>
+        <Card className="p-4 mb-4">
+          <div className="rounded-xl overflow-hidden bg-gradient-to-br from-[#DCE6DB] to-[#C7D6C4] p-3">
+            <FieldMap field={useMemo(() => genField(21), [])} onSelect={() => {}} selectedId={null} compact />
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] text-[#2C5F3D] font-medium mt-2">
+            <MapPinned size={13} /> {t.drawBoundary}
+          </div>
+        </Card>
+        <Card className="p-5">
+          <label className="text-[12px] font-medium text-[#3A4A3D]">{t.farmName}</label>
+          <input value={farmName} onChange={(e) => setFarmName(e.target.value)} placeholder="Godhra North Field"
+            className="w-full mt-1.5 mb-4 border border-[#D8D5C4] rounded-xl px-3 py-2.5 bg-white outline-none text-sm" />
+          <label className="text-[12px] font-medium text-[#3A4A3D]">{t.cropType}</label>
+          <div className="flex flex-wrap gap-2 mt-1.5 mb-4">
+            {crops.map((c) => (
+              <button key={c} onClick={() => setCrop(c)}
+                className={`px-3 py-1.5 rounded-full text-[12px] font-medium border ${crop === c ? "bg-[#2C5F3D] text-white border-[#2C5F3D]" : "bg-white text-[#3A4A3D] border-[#D8D5C4]"}`}>
+                {c}
+              </button>
+            ))}
+          </div>
+          <label className="text-[12px] font-medium text-[#3A4A3D]">{t.farmArea}</label>
+          <input value={area} onChange={(e) => setArea(e.target.value)}
+            className="w-full mt-1.5 mb-6 border border-[#D8D5C4] rounded-xl px-3 py-2.5 bg-white outline-none text-sm font-mono" />
+          <button disabled={!farmName} onClick={() => onDone({ farmName, crop, area })}
+            className="w-full bg-[#E3A23C] disabled:opacity-40 text-[#14213D] font-semibold py-3 rounded-xl flex items-center justify-center gap-2">
+            {t.finishSetup} <ChevronRight size={16} />
+          </button>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+/* ================= Header + Nav ================= */
+const TABS = [
+  { key: "dashboard", icon: Home },
+  { key: "map", icon: MapPin },
+  { key: "irrigation", icon: Droplet },
+  { key: "pest", icon: Bug },
+  { key: "weather", icon: CloudSun },
+  { key: "satellite", icon: Satellite },
+  { key: "drone", icon: Plane },
+  { key: "damage", icon: Camera },
+  { key: "alerts", icon: Bell },
+];
+
+function Header({ t, lang, setLang, online, setOnline, unread, onProfile, onAlerts, farm }) {
+  return (
+    <div className="sticky top-0 z-30 bg-[#14213D]">
+      {!online && (
+        <div className="bg-[#E3A23C] text-[#14213D] text-[12px] font-semibold flex items-center justify-center gap-1.5 py-1.5">
+          <WifiOff size={13} /> Offline mode — data queued, will sync automatically
+        </div>
+      )}
+      <div className="flex items-center justify-between px-4 sm:px-6 py-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#2C5F3D] to-[#6FA96B] flex items-center justify-center shrink-0">
+            <Sprout size={16} className="text-white" />
+          </div>
+          <div className="leading-tight">
+            <div className="font-['Space_Grotesk'] font-semibold text-white text-[15px]">{t.appName}</div>
+            <div className="text-[10px] text-[#9FB0A2] font-mono">{farm?.farmName || "—"}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => setOnline((v) => !v)}
+            title="Simulate connectivity"
+            className={`w-8 h-8 rounded-lg flex items-center justify-center ${online ? "bg-white/10 text-[#6FA96B]" : "bg-[#E3A23C]/20 text-[#E3A23C]"}`}>
+            {online ? <Wifi size={15} /> : <WifiOff size={15} />}
+          </button>
+          <button onClick={() => setLang(lang === "en" ? "hi" : "en")}
+            className="w-8 h-8 rounded-lg bg-white/10 text-white flex items-center justify-center">
+            <Globe size={15} />
+          </button>
+          <button onClick={onAlerts} className="relative w-8 h-8 rounded-lg bg-white/10 text-white flex items-center justify-center">
+            <Bell size={15} />
+            {unread > 0 && <span className="absolute -top-1 -right-1 bg-[#C1442D] text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">{unread}</span>}
+          </button>
+          <button onClick={onProfile} className="w-8 h-8 rounded-full bg-[#E3A23C] text-[#14213D] flex items-center justify-center font-bold text-[12px]">
+            RP
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TopTabs({ active, setActive, t }) {
+  return (
+    <div className="sticky top-[52px] z-20 bg-[#14213D] border-b border-white/10 overflow-x-auto no-scrollbar">
+      <div className="flex px-3 sm:px-5 gap-1 pb-2">
+        {TABS.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = active === tab.key;
+          return (
+            <button key={tab.key} onClick={() => setActive(tab.key)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12.5px] font-medium whitespace-nowrap transition-colors
+                ${isActive ? "bg-[#FBFAF6] text-[#14213D]" : "text-[#B7C2B9] hover:bg-white/5"}`}>
+              <Icon size={14} /> {t[tab.key]}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ================= Dashboard ================= */
+function Dashboard({ t, field, onOpenCell, onGo, stats, farm }) {
+  const critical = field.filter((c) => c.stage === 3).length;
+  const stage2 = field.filter((c) => c.stage === 2).length;
+  const stage1 = field.filter((c) => c.stage === 1).length;
+  return (
+    <div className="px-4 sm:px-6 py-5 max-w-5xl mx-auto">
+      <div className="flex items-center justify-between mb-1">
+        <div>
+          <div className="text-[13px] text-[#7C8A7E]">{t.greeting}, Ramesh 👋</div>
+          <h1 className="font-['Space_Grotesk'] text-[22px] font-bold text-[#14213D]">{farm?.farmName}</h1>
+        </div>
+        <Pill tone="green"><Sprout size={12} /> {farm?.crop} · {farm?.area} ac</Pill>
+      </div>
+
+      {/* Hero satellite-pass strip — signature element */}
+      <div className="relative mt-4 mb-5 rounded-2xl overflow-hidden bg-[#14213D] px-5 py-4">
+        <style>{`@keyframes kd-scan { 0% {left:-10%;} 100% {left:110%;} }`}</style>
+        <div className="absolute top-0 h-full w-[2px] bg-gradient-to-b from-transparent via-[#6FA96B] to-transparent opacity-70"
+          style={{ animation: "kd-scan 5s linear infinite" }} />
+        <div className="flex items-center justify-between text-white relative z-10">
+          <div className="flex items-center gap-2 text-[12px] font-mono text-[#9FB0A2]">
+            <Satellite size={13} className="text-[#6FA96B]" /> Sentinel-2 pass · {t.lastUpdate}: 3h ago
+          </div>
+          <Pill tone="dark" className="!bg-white/10">{t.simulated}</Pill>
+        </div>
+        <div className="grid grid-cols-3 gap-3 mt-3 relative z-10">
+          {[{ n: 1, label: t.stage1, count: stage1, color: "#E3A23C" }, { n: 2, label: t.stage2, count: stage2, color: "#D97C3B" }, { n: 3, label: t.stage3, count: critical, color: "#C1442D" }].map((s) => (
+            <div key={s.n} className="bg-white/[0.06] rounded-xl p-2.5">
+              <div className="flex items-center gap-1.5 text-[10px] font-mono text-[#9FB0A2] uppercase tracking-wide">Stage {s.n}</div>
+              <div className="text-white font-['Space_Grotesk'] font-bold text-lg mt-0.5">{s.count} <span className="text-[11px] font-normal text-[#9FB0A2]">zones</span></div>
+              <div className="text-[10.5px] mt-0.5" style={{ color: s.color }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <Card className="p-4 flex items-center gap-3 col-span-2 sm:col-span-1">
+          <Gauge value={stats.health} color="#2C5F3D" />
+          <div>
+            <div className="text-[11px] text-[#7C8A7E]">{t.overallHealth}</div>
+            <div className="text-[13px] font-semibold text-[#2C5F3D] mt-0.5">{t.healthy}</div>
+          </div>
+        </Card>
+        <Card className="p-4">
+          <TriangleAlert size={16} className="text-[#E3A23C] mb-2" />
+          <div className="text-[11px] text-[#7C8A7E]">{t.stressLevel}</div>
+          <div className="font-['Space_Grotesk'] font-bold text-[18px] text-[#14213D]">Moderate</div>
+        </Card>
+        <Card className="p-4">
+          <MapPin size={16} className="text-[#C1442D] mb-2" />
+          <div className="text-[11px] text-[#7C8A7E]">{t.affectedArea}</div>
+          <div className="font-['Space_Grotesk'] font-bold text-[18px] text-[#14213D]">{(((stage1 + stage2 + critical) / field.length) * farm.area).toFixed(1)} ac</div>
+        </Card>
+        <Card className="p-4">
+          <Clock size={16} className="text-[#6FA96B] mb-2" />
+          <div className="text-[11px] text-[#7C8A7E]">{t.lastUpdate}</div>
+          <div className="font-['Space_Grotesk'] font-bold text-[18px] text-[#14213D]">3h ago</div>
+        </Card>
+      </div>
+
+      <div className="grid lg:grid-cols-5 gap-5">
+        <Card className="p-5 lg:col-span-3">
+          <SectionTitle eyebrow="Interactive · tap a zone" title="Farm Health Map" action={<button onClick={() => onGo("map")} className="text-[12px] font-semibold text-[#2C5F3D] flex items-center gap-1">Open map <ChevronRight size={13} /></button>} />
+          <FieldMap field={field} onSelect={onOpenCell} selectedId={null} />
+          <div className="flex flex-wrap gap-3 mt-4">
+            {STAGE_META.map((s) => (
+              <div key={s.key} className="flex items-center gap-1.5 text-[11px] text-[#3A4A3D]">
+                <span className="w-2.5 h-2.5 rounded-sm" style={{ background: s.color }} /> {s.label}
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <div className="lg:col-span-2 flex flex-col gap-4">
+          <Card className="p-5">
+            <SectionTitle title="Quick Actions" />
+            <div className="grid grid-cols-2 gap-2.5">
+              {[
+                { label: t.checkField, icon: Eye, go: "map", tone: "green" },
+                { label: "Irrigation", icon: Droplet, go: "irrigation", tone: "gold" },
+                { label: t.uploadPhoto, icon: Camera, go: "damage", tone: "orange" },
+                { label: t.requestDrone, icon: Plane, go: "drone", tone: "dark" },
+              ].map((a) => {
+                const Icon = a.icon;
+                return (
+                  <button key={a.label} onClick={() => onGo(a.go)}
+                    className="flex flex-col items-start gap-2 rounded-xl border border-[#E4E2D6] bg-white p-3 hover:border-[#2C5F3D] transition-colors text-left">
+                    <div className="w-8 h-8 rounded-lg bg-[#EEF2ED] flex items-center justify-center"><Icon size={15} className="text-[#2C5F3D]" /></div>
+                    <span className="text-[12.5px] font-medium text-[#14213D] leading-tight">{a.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </Card>
+          <Card className="p-5">
+            <SectionTitle title="NDVI Trend · 14 days" eyebrow="Vegetation index" />
+            <ResponsiveContainer width="100%" height={140}>
+              <AreaChart data={ndviTrend} margin={{ left: -20, right: 8, top: 4 }}>
+                <defs>
+                  <linearGradient id="ndviFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#2C5F3D" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#2C5F3D" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid vertical={false} stroke="#E4E2D6" />
+                <XAxis dataKey="day" tick={{ fontSize: 9, fill: "#7C8A7E" }} axisLine={false} tickLine={false} />
+                <YAxis domain={[0.2, 0.85]} hide />
+                <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid #E4E2D6" }} />
+                <Area type="monotone" dataKey="ndvi" stroke="#2C5F3D" strokeWidth={2} fill="url(#ndviFill)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================= Cell Detail Drawer (Crop Stress Details) ================= */
+function CellDrawer({ cell, onClose, t, onRequestDrone }) {
+  if (!cell) return null;
+  const meta = STAGE_META[cell.stage];
+  const recs = [
+    "Field looks healthy. Continue regular monitoring.",
+    "Earliest warning — soil moisture is declining. Consider light irrigation within 2–3 days.",
+    "Canopy temperature is rising, a sign of water stress. Irrigate soon and inspect in person.",
+    "Visible greenness loss detected. Inspect immediately — irrigation and nutrient check advised.",
+  ];
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#14213D]/50 backdrop-blur-[2px]" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="bg-[#FBFAF6] w-full sm:max-w-md sm:rounded-3xl rounded-t-3xl p-6 max-h-[88vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <Pill tone={cell.stage === 0 ? "green" : cell.stage === 1 ? "gold" : cell.stage === 2 ? "orange" : "red"}>
+            Zone {String.fromCharCode(65 + cell.r)}{cell.c + 1} · {meta.label}
+          </Pill>
+          <button onClick={onClose} className="text-[#7C8A7E]"><X size={18} /></button>
+        </div>
+
+        <StageTrack current={cell.stage} t={t} />
+
+        <div className="grid grid-cols-3 gap-2.5 mt-5">
+          <div className="bg-white rounded-xl border border-[#E4E2D6] p-3 text-center">
+            <Leaf size={14} className="mx-auto text-[#2C5F3D] mb-1" />
+            <div className="font-['Space_Grotesk'] font-bold text-[15px] text-[#14213D]">{cell.ndvi}</div>
+            <div className="text-[10px] text-[#7C8A7E]">NDVI</div>
+          </div>
+          <div className="bg-white rounded-xl border border-[#E4E2D6] p-3 text-center">
+            <Droplets size={14} className="mx-auto text-[#2760C6] mb-1" />
+            <div className="font-['Space_Grotesk'] font-bold text-[15px] text-[#14213D]">{cell.moisture}%</div>
+            <div className="text-[10px] text-[#7C8A7E]">Soil moisture</div>
+          </div>
+          <div className="bg-white rounded-xl border border-[#E4E2D6] p-3 text-center">
+            <Thermometer size={14} className="mx-auto text-[#C1442D] mb-1" />
+            <div className="font-['Space_Grotesk'] font-bold text-[15px] text-[#14213D]">{cell.canopyTemp}°C</div>
+            <div className="text-[10px] text-[#7C8A7E]">Canopy temp</div>
+          </div>
+        </div>
+
+        <div className="mt-4 bg-white rounded-xl border border-[#E4E2D6] p-3 flex items-center gap-2 text-[11px] font-mono text-[#7C8A7E]">
+          <MapPinned size={13} /> {cell.lat}, {cell.lng}
+        </div>
+
+        <div className="mt-4 rounded-xl p-3.5" style={{ background: meta.light }}>
+          <div className="text-[13px] leading-relaxed text-[#3A4A3D]">{recs[cell.stage]}</div>
+        </div>
+
+        {cell.stage >= 2 && (
+          <button onClick={() => onRequestDrone(cell)}
+            className="w-full mt-4 bg-[#14213D] text-white font-semibold py-3 rounded-xl flex items-center justify-center gap-2">
+            <Plane size={16} /> {t.requestDrone}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ================= Farm Map Screen ================= */
+function MapScreen({ field, onOpenCell, t }) {
+  const counts = STAGE_META.map((s) => field.filter((c) => c.stage === s.key).length);
+  return (
+    <div className="px-4 sm:px-6 py-5 max-w-5xl mx-auto">
+      <SectionTitle eyebrow="Live · updated every satellite pass" title={t.map} />
+      <Card className="p-4 sm:p-6">
+        <div className="rounded-xl bg-gradient-to-br from-[#DCE6DB] to-[#C7D6C4] p-4">
+          <FieldMap field={field} onSelect={onOpenCell} selectedId={null} />
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-4">
+          {STAGE_META.map((s, i) => (
+            <div key={s.key} className="rounded-xl border border-[#E4E2D6] p-3 flex items-center gap-2.5">
+              <span className="w-3 h-3 rounded-sm shrink-0" style={{ background: s.color }} />
+              <div>
+                <div className="text-[11px] text-[#7C8A7E] leading-tight">{s.label}</div>
+                <div className="font-['Space_Grotesk'] font-bold text-[15px] text-[#14213D]">{counts[i]} zones</div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5 text-[11px] text-[#2760C6] font-medium mt-3">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#2760C6]" /> Blue outline = flagged for drone verification
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ================= Irrigation ================= */
+function IrrigationScreen({ t }) {
+  const moisture = 34, rainProb = 62, temp = 33;
+  const needsIrrigation = moisture < 40 && rainProb < 50;
+  return (
+    <div className="px-4 sm:px-6 py-5 max-w-4xl mx-auto">
+      <SectionTitle eyebrow="Smart recommendation" title="Smart Irrigation" />
+      <Card className="p-6 mb-4">
+        <div className="flex items-center gap-4">
+          <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 ${needsIrrigation ? "bg-[#FBEED9]" : "bg-[#E4F1E1]"}`}>
+            <Droplet size={24} className={needsIrrigation ? "text-[#E3A23C]" : "text-[#2C5F3D]"} />
+          </div>
+          <div>
+            <div className="font-['Space_Grotesk'] font-semibold text-[16px] text-[#14213D]">
+              {needsIrrigation ? "Your field may need irrigation" : "Rainfall expected — irrigation can possibly be delayed"}
+            </div>
+            <div className="text-[12.5px] text-[#7C8A7E] mt-1">Guidance based on soil moisture, forecast & crop stage — not a guaranteed instruction.</div>
+          </div>
+        </div>
+      </Card>
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <Card className="p-4 text-center"><Droplets size={16} className="mx-auto text-[#2760C6] mb-1.5" /><div className="font-['Space_Grotesk'] font-bold text-[16px] text-[#14213D]">{moisture}%</div><div className="text-[11px] text-[#7C8A7E]">Soil moisture</div></Card>
+        <Card className="p-4 text-center"><CloudRain size={16} className="mx-auto text-[#2C5F3D] mb-1.5" /><div className="font-['Space_Grotesk'] font-bold text-[16px] text-[#14213D]">{rainProb}%</div><div className="text-[11px] text-[#7C8A7E]">Rain probability</div></Card>
+        <Card className="p-4 text-center"><Thermometer size={16} className="mx-auto text-[#C1442D] mb-1.5" /><div className="font-['Space_Grotesk'] font-bold text-[16px] text-[#14213D]">{temp}°C</div><div className="text-[11px] text-[#7C8A7E]">Temperature</div></Card>
+      </div>
+      <Card className="p-5">
+        <SectionTitle title="7-day rainfall outlook" eyebrow="Forecast" />
+        <ResponsiveContainer width="100%" height={160}>
+          <BarChart data={rainfallData} margin={{ left: -20 }}>
+            <CartesianGrid vertical={false} stroke="#E4E2D6" />
+            <XAxis dataKey="day" tick={{ fontSize: 11, fill: "#7C8A7E" }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 10, fill: "#7C8A7E" }} axisLine={false} tickLine={false} />
+            <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid #E4E2D6" }} />
+            <Bar dataKey="mm" fill="#2760C6" radius={[5, 5, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
+    </div>
+  );
+}
+
+/* ================= Pest & Disease ================= */
+function PestScreen({ t }) {
+  const humidity = 78, temp = 31;
+  const risk = humidity > 70 && temp > 28 ? "High" : humidity > 55 ? "Medium" : "Low";
+  const riskColor = risk === "High" ? "#C1442D" : risk === "Medium" ? "#E3A23C" : "#2C5F3D";
+  return (
+    <div className="px-4 sm:px-6 py-5 max-w-4xl mx-auto">
+      <SectionTitle eyebrow="Environmental risk model" title={t.pest} />
+      <Card className="p-6 mb-4 flex items-center gap-5">
+        <Gauge value={risk === "High" ? 82 : risk === "Medium" ? 52 : 20} color={riskColor} sub="risk" />
+        <div>
+          <Pill tone={risk === "High" ? "red" : risk === "Medium" ? "gold" : "green"}><Bug size={12} /> {risk} pest-risk conditions</Pill>
+          <div className="text-[13.5px] text-[#3A4A3D] mt-2 leading-relaxed max-w-md">
+            ⚠️ Warm, humid conditions detected across your field this week. Please inspect your crop closely — this is an environmental risk signal, not a confirmed diagnosis.
+          </div>
+        </div>
+      </Card>
+      <div className="grid grid-cols-2 gap-3 mb-4">
+        <Card className="p-4"><div className="text-[11px] text-[#7C8A7E]">Humidity</div><div className="font-['Space_Grotesk'] font-bold text-[18px] text-[#14213D]">{humidity}%</div></Card>
+        <Card className="p-4"><div className="text-[11px] text-[#7C8A7E]">Temperature</div><div className="font-['Space_Grotesk'] font-bold text-[18px] text-[#14213D]">{temp}°C</div></Card>
+      </div>
+      <Card className="p-5">
+        <SectionTitle title="Watch conditions" />
+        <ul className="space-y-2.5">
+          {[
+            "Sustained leaf wetness after rainfall — favourable for fungal spread",
+            "Night temperatures above 22°C — favourable for insect activity",
+            "Dense canopy with poor airflow in Zone D3–D5",
+          ].map((it, i) => (
+            <li key={i} className="flex items-start gap-2 text-[13px] text-[#3A4A3D]">
+              <TriangleAlert size={14} className="text-[#E3A23C] mt-0.5 shrink-0" /> {it}
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </div>
+  );
+}
+
+/* ================= Weather ================= */
+function WeatherScreen({ t }) {
+  const days = [
+    { d: "Today", icon: Sun, hi: 34, lo: 24, rain: 5 },
+    { d: "Tomorrow", icon: CloudSun, hi: 32, lo: 23, rain: 20 },
+    { d: "Thu", icon: CloudRain, hi: 28, lo: 22, rain: 80 },
+    { d: "Fri", icon: CloudRain, hi: 29, lo: 22, rain: 45 },
+    { d: "Sat", icon: Sun, hi: 33, lo: 23, rain: 5 },
+  ];
+  return (
+    <div className="px-4 sm:px-6 py-5 max-w-4xl mx-auto">
+      <SectionTitle eyebrow="Local forecast" title={t.weather} />
+      <Card className="p-6 mb-4 bg-gradient-to-br from-[#14213D] to-[#1E3054] border-none">
+        <div className="flex items-center justify-between text-white">
+          <div>
+            <div className="font-['Space_Grotesk'] font-bold text-[38px] leading-none">33°C</div>
+            <div className="text-[13px] text-[#B7C2B9] mt-1">Partly cloudy · Feels like 36°C</div>
+          </div>
+          <Sun size={44} className="text-[#E3A23C]" />
+        </div>
+        <div className="grid grid-cols-3 gap-3 mt-5">
+          <div className="flex items-center gap-1.5 text-[#DCE6DB] text-[12px]"><Wind size={13} /> 14 km/h</div>
+          <div className="flex items-center gap-1.5 text-[#DCE6DB] text-[12px]"><Droplets size={13} /> 58% humidity</div>
+          <div className="flex items-center gap-1.5 text-[#DCE6DB] text-[12px]"><CloudRain size={13} /> 20% rain</div>
+        </div>
+      </Card>
+      <div className="grid grid-cols-5 gap-2 mb-4">
+        {days.map((d) => {
+          const Icon = d.icon;
+          return (
+            <Card key={d.d} className="p-3 text-center">
+              <div className="text-[10.5px] text-[#7C8A7E] mb-1.5">{d.d}</div>
+              <Icon size={18} className="mx-auto text-[#E3A23C] mb-1.5" />
+              <div className="text-[12px] font-semibold text-[#14213D]">{d.hi}°</div>
+              <div className="text-[10.5px] text-[#7C8A7E]">{d.lo}°</div>
+            </Card>
+          );
+        })}
+      </div>
+      <Card className="p-5">
+        <SectionTitle title="Rainfall this week (mm)" />
+        <ResponsiveContainer width="100%" height={150}>
+          <LineChart data={rainfallData} margin={{ left: -20 }}>
+            <CartesianGrid vertical={false} stroke="#E4E2D6" />
+            <XAxis dataKey="day" tick={{ fontSize: 11, fill: "#7C8A7E" }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 10, fill: "#7C8A7E" }} axisLine={false} tickLine={false} />
+            <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid #E4E2D6" }} />
+            <Line type="monotone" dataKey="mm" stroke="#2760C6" strokeWidth={2.5} dot={{ r: 3 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      </Card>
+    </div>
+  );
+}
+
+/* ================= Satellite Analysis ================= */
+function SatelliteScreen({ t }) {
+  const sources = [
+    { name: "ISRO Bhuvan", status: "Synced", time: "3h ago", res: "5.8m" },
+    { name: "Resourcesat-2A", status: "Synced", time: "3h ago", res: "24m" },
+    { name: "Sentinel-2 (ESA)", status: "Synced", time: "5h ago", res: "10m" },
+  ];
+  return (
+    <div className="px-4 sm:px-6 py-5 max-w-4xl mx-auto">
+      <SectionTitle eyebrow="Processed via Google Earth Engine" title={t.satellite} />
+      <Card className="p-4 mb-4 flex items-center gap-2 bg-[#FBEED9] border-[#EFD8AC]">
+        <TriangleAlert size={15} className="text-[#8A5A18] shrink-0" />
+        <span className="text-[12px] text-[#8A5A18]">{t.simulated} — live API integration planned for production release.</span>
+      </Card>
+      <Card className="p-5 mb-4">
+        <SectionTitle title="NDVI & moisture index · 14 days" eyebrow="Vegetation health trend" />
+        <ResponsiveContainer width="100%" height={200}>
+          <AreaChart data={ndviTrend} margin={{ left: -14, right: 8 }}>
+            <defs>
+              <linearGradient id="ndviFill2" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#2C5F3D" stopOpacity={0.35} />
+                <stop offset="100%" stopColor="#2C5F3D" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid vertical={false} stroke="#E4E2D6" />
+            <XAxis dataKey="day" tick={{ fontSize: 10, fill: "#7C8A7E" }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 10, fill: "#7C8A7E" }} axisLine={false} tickLine={false} domain={[0.2, 0.9]} />
+            <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid #E4E2D6" }} />
+            <Area type="monotone" dataKey="ndvi" name="NDVI" stroke="#2C5F3D" strokeWidth={2} fill="url(#ndviFill2)" />
+            <Line type="monotone" dataKey="moisture" name="Moisture idx" stroke="#2760C6" strokeWidth={1.5} dot={false} />
+          </AreaChart>
+        </ResponsiveContainer>
+      </Card>
+      <Card className="p-5">
+        <SectionTitle title="Connected data sources" />
+        <div className="space-y-2.5">
+          {sources.map((s) => (
+            <div key={s.name} className="flex items-center justify-between border border-[#E4E2D6] rounded-xl px-4 py-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-[#EEF2ED] flex items-center justify-center"><Satellite size={15} className="text-[#2C5F3D]" /></div>
+                <div>
+                  <div className="text-[13px] font-medium text-[#14213D]">{s.name}</div>
+                  <div className="text-[11px] text-[#7C8A7E] font-mono">{s.res} resolution · {s.time}</div>
+                </div>
+              </div>
+              <Pill tone="green"><CircleCheck size={11} /> {s.status}</Pill>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ================= Drone Verification ================= */
+const DRONE_STEPS = ["Requested", "Dispatched", "Capturing Imagery", "AI Comparing", "Verified"];
+function DroneScreen({ t, request, setRequest }) {
+  const step = request?.step ?? -1;
+  return (
+    <div className="px-4 sm:px-6 py-5 max-w-4xl mx-auto">
+      <SectionTitle eyebrow="Ground-truth verification" title={t.drone} />
+      {!request ? (
+        <Card>
+          <EmptyBanner icon={Plane} title="No active drone request" sub="Flag a stressed zone on the Farm Map, then request drone verification to see the workflow here." />
+        </Card>
+      ) : (
+        <>
+          <Card className="p-6 mb-4">
+            <div className="flex items-center justify-between mb-5">
+              <Pill tone="dark">Zone {String.fromCharCode(65 + request.cell.r)}{request.cell.c + 1}</Pill>
+              <span className="text-[11px] font-mono text-[#7C8A7E]">{request.cell.lat}, {request.cell.lng}</span>
+            </div>
+            <div className="flex items-center">
+              {DRONE_STEPS.map((s, i) => (
+                <React.Fragment key={s}>
+                  <div className="flex flex-col items-center gap-1.5 w-16">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold
+                      ${i < step ? "bg-[#2C5F3D] text-white" : i === step ? "bg-[#E3A23C] text-[#14213D]" : "bg-[#EEF2ED] text-[#9CA79E]"}`}>
+                      {i < step ? <Check size={13} /> : i === step ? <Loader2 size={13} className="animate-spin" /> : i + 1}
+                    </div>
+                    <span className="text-[9.5px] text-center leading-tight text-[#3A4A3D]">{s}</span>
+                  </div>
+                  {i < DRONE_STEPS.length - 1 && <div className={`h-[2px] flex-1 -mt-5 ${i < step ? "bg-[#2C5F3D]" : "bg-[#E4E2D6]"}`} />}
+                </React.Fragment>
+              ))}
+            </div>
+            {step < DRONE_STEPS.length - 1 ? (
+              <button onClick={() => setRequest((r) => ({ ...r, step: r.step + 1 }))}
+                className="w-full mt-6 bg-[#14213D] text-white font-semibold py-3 rounded-xl flex items-center justify-center gap-2">
+                <Radio size={15} /> Simulate: {DRONE_STEPS[step + 1]}
+              </button>
+            ) : (
+              <div className="mt-6 bg-[#E4F1E1] text-[#2C5F3D] text-[13px] font-medium rounded-xl px-4 py-3 flex items-center gap-2">
+                <CircleCheck size={16} /> Verification complete — see imagery comparison below.
+              </div>
+            )}
+          </Card>
+
+          {step >= 3 && (
+            <Card className="p-5">
+              <SectionTitle title="Satellite vs Drone imagery" eyebrow="Comparison" />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="rounded-xl h-36 relative overflow-hidden" style={{ background: "repeating-linear-gradient(45deg,#8FA98B,#8FA98B 6px,#A6BDA2 6px,#A6BDA2 12px)" }}>
+                    <div className="absolute inset-0 backdrop-blur-[2px] bg-[#2C5F3D]/10" />
+                    <span className="absolute bottom-2 left-2 text-[10px] bg-black/40 text-white px-2 py-0.5 rounded-full font-mono">10m · low detail</span>
+                  </div>
+                  <div className="text-[11px] text-[#7C8A7E] mt-1.5 text-center">Satellite (Sentinel-2)</div>
+                </div>
+                <div>
+                  <div className="rounded-xl h-36 relative overflow-hidden" style={{ background: "repeating-linear-gradient(135deg,#6B8F5E,#6B8F5E 4px,#C1442D 4px,#C1442D 6px,#6B8F5E 6px,#6B8F5E 10px)" }}>
+                    <span className="absolute bottom-2 left-2 text-[10px] bg-black/40 text-white px-2 py-0.5 rounded-full font-mono">2cm · high detail</span>
+                  </div>
+                  <div className="text-[11px] text-[#7C8A7E] mt-1.5 text-center">Drone (UAV)</div>
+                </div>
+              </div>
+              <div className="mt-4 bg-[#F7DAD3] text-[#8E2A18] text-[13px] rounded-xl px-4 py-3">
+                Drone imagery confirms water-stress pattern matching satellite prediction — visible wilting on ~18% of the flagged zone.
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ================= Damage Proof + Insurance ================= */
+function DamageScreen({ t, reports, addReport, online }) {
+  const fileRef = useRef(null);
+  const [preview, setPreview] = useState(null);
+  const [event, setEvent] = useState("Flood");
+
+  function handleFile(e) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const url = URL.createObjectURL(f);
+    setPreview(url);
+  }
+  function submit() {
+    if (!preview) return;
+    addReport({
+      id: Date.now(), img: preview, event,
+      time: new Date().toLocaleString(),
+      lat: (23.2599 + Math.random() * 0.003).toFixed(5),
+      lng: (77.4126 + Math.random() * 0.003).toFixed(5),
+      synced: online,
+    });
+    setPreview(null);
+  }
+
+  return (
+    <div className="px-4 sm:px-6 py-5 max-w-4xl mx-auto">
+      <SectionTitle eyebrow="Geotagged evidence" title={t.damage} />
+      <Card className="p-5 mb-5">
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label className="text-[12px] font-medium text-[#3A4A3D]">Event type</label>
+            <div className="flex flex-wrap gap-2 mt-1.5 mb-3">
+              {["Flood", "Storm", "Hail", "Drought", "Pest outbreak"].map((ev) => (
+                <button key={ev} onClick={() => setEvent(ev)}
+                  className={`px-3 py-1.5 rounded-full text-[12px] font-medium border ${event === ev ? "bg-[#C1442D] text-white border-[#C1442D]" : "bg-white text-[#3A4A3D] border-[#D8D5C4]"}`}>
+                  {ev}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => fileRef.current?.click()}
+              className="w-full border-2 border-dashed border-[#D8D5C4] rounded-xl py-6 flex flex-col items-center gap-1.5 text-[#7C8A7E] hover:border-[#2C5F3D]">
+              <Camera size={22} />
+              <span className="text-[12.5px] font-medium">{t.uploadPhoto}</span>
+            </button>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+          </div>
+          <div>
+            <label className="text-[12px] font-medium text-[#3A4A3D]">Preview</label>
+            <div className="mt-1.5 h-[164px] rounded-xl bg-[#EEF2ED] flex items-center justify-center overflow-hidden border border-[#E4E2D6]">
+              {preview ? <img src={preview} className="w-full h-full object-cover" /> : <span className="text-[11px] text-[#9CA79E]">No photo selected</span>}
+            </div>
+            {preview && (
+              <div className="flex items-center gap-1.5 text-[10.5px] text-[#7C8A7E] font-mono mt-1.5">
+                <MapPinned size={11} /> auto-geotag + timestamp on submit
+              </div>
+            )}
+          </div>
+        </div>
+        <button disabled={!preview} onClick={submit}
+          className="w-full mt-4 bg-[#2C5F3D] disabled:opacity-40 text-white font-semibold py-3 rounded-xl flex items-center justify-center gap-2">
+          <ClipboardList size={16} /> Generate Damage Report
+        </button>
+      </Card>
+
+      <SectionTitle title="Insurance / Damage Reports" eyebrow={`${reports.length} filed`} />
+      {reports.length === 0 ? (
+        <Card><EmptyBanner icon={FileText} title="No reports yet" sub="Reports you submit will appear here, ready to support an insurance claim." /></Card>
+      ) : (
+        <div className="space-y-3">
+          {reports.map((r) => (
+            <Card key={r.id} className="p-4 flex gap-3">
+              <img src={r.img} className="w-20 h-20 rounded-lg object-cover shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <Pill tone="red">{r.event}</Pill>
+                  {r.synced ? <span className="text-[10px] text-[#2C5F3D] flex items-center gap-1"><Check size={11} /> Synced</span> : <span className="text-[10px] text-[#E3A23C] flex items-center gap-1"><Clock size={11} /> Queued offline</span>}
+                </div>
+                <div className="text-[11px] text-[#7C8A7E] mt-1.5">{r.time}</div>
+                <div className="text-[10.5px] font-mono text-[#7C8A7E] flex items-center gap-1 mt-0.5"><MapPinned size={10} /> {r.lat}, {r.lng}</div>
+              </div>
+              <button className="self-start text-[#2C5F3D]"><Download size={16} /></button>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================= Alerts ================= */
+const ALERT_ICON = { stress: TriangleAlert, irrigation: Droplet, pest: Bug, weather: CloudRain, damage: Camera };
+function AlertsScreen({ t, lang, alerts, setAlerts, voice, setVoice }) {
+  return (
+    <div className="px-4 sm:px-6 py-5 max-w-3xl mx-auto">
+      <div className="flex items-center justify-between mb-3">
+        <SectionTitle eyebrow={`${alerts.filter((a) => !a.read).length} unread`} title={t.alerts} />
+        <button onClick={() => setVoice((v) => !v)}
+          className={`flex items-center gap-1.5 text-[12px] font-medium px-3 py-2 rounded-lg border ${voice ? "bg-[#E4F1E1] border-[#2C5F3D] text-[#2C5F3D]" : "bg-white border-[#D8D5C4] text-[#7C8A7E]"}`}>
+          {voice ? <Volume2 size={14} /> : <Mic size={14} />} Voice alerts {voice ? "on" : "off"}
+        </button>
+      </div>
+      <div className="space-y-2.5">
+        {alerts.map((a) => {
+          const Icon = ALERT_ICON[a.type] || Bell;
+          const sevTone = a.severity === "critical" ? "red" : a.severity === "warning" ? "gold" : "green";
+          return (
+            <Card key={a.id} onClick={() => setAlerts((prev) => prev.map((x) => (x.id === a.id ? { ...x, read: true } : x)))}
+              className={`p-4 flex gap-3 cursor-pointer ${!a.read ? "border-l-4 border-l-[#2C5F3D]" : ""}`}>
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${sevTone === "red" ? "bg-[#F7DAD3]" : sevTone === "gold" ? "bg-[#FBEED9]" : "bg-[#E4F1E1]"}`}>
+                <Icon size={17} className={sevTone === "red" ? "text-[#C1442D]" : sevTone === "gold" ? "text-[#8A5A18]" : "text-[#2C5F3D]"} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[13.5px] font-semibold text-[#14213D]">{a.title}</span>
+                  {!a.read && <span className="w-2 h-2 rounded-full bg-[#C1442D] shrink-0" />}
+                </div>
+                <div className="text-[12.5px] text-[#3A4A3D] mt-0.5 leading-relaxed">{lang === "hi" ? a.hi : a.en}</div>
+                <div className="text-[10.5px] text-[#9CA79E] mt-1.5 flex items-center gap-1"><Clock size={10} /> {a.time}</div>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ================= Profile ================= */
+function ProfileScreen({ t, lang, setLang, voice, setVoice, farm, onClose }) {
+  const [dataSaver, setDataSaver] = useState(true);
+  return (
+    <div className="fixed inset-0 z-50 bg-[#14213D]/50 backdrop-blur-[2px] flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="bg-[#FBFAF6] w-full sm:max-w-sm sm:rounded-3xl rounded-t-3xl p-6 max-h-[88vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="font-['Space_Grotesk'] text-lg font-semibold text-[#14213D]">{t.profile}</h2>
+          <button onClick={onClose} className="text-[#7C8A7E]"><X size={18} /></button>
+        </div>
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-14 h-14 rounded-full bg-[#E3A23C] text-[#14213D] flex items-center justify-center font-bold text-lg">RP</div>
+          <div>
+            <div className="font-semibold text-[#14213D]">Ramesh Patel</div>
+            <div className="text-[12px] text-[#7C8A7E]">{farm?.farmName} · {farm?.crop}</div>
+          </div>
+        </div>
+        <div className="space-y-1">
+          <div className="flex items-center justify-between py-3 border-b border-[#E4E2D6]">
+            <div className="flex items-center gap-2.5 text-[13.5px] text-[#3A4A3D]"><Globe size={16} /> Language</div>
+            <div className="flex gap-1">
+              {["en", "hi"].map((l) => (
+                <button key={l} onClick={() => setLang(l)} className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold ${lang === l ? "bg-[#2C5F3D] text-white" : "bg-[#EEF2ED] text-[#7C8A7E]"}`}>{l === "en" ? "English" : "हिंदी"}</button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center justify-between py-3 border-b border-[#E4E2D6]">
+            <div className="flex items-center gap-2.5 text-[13.5px] text-[#3A4A3D]"><Volume2 size={16} /> Voice alerts</div>
+            <button onClick={() => setVoice((v) => !v)} className={`w-10 h-6 rounded-full relative transition-colors ${voice ? "bg-[#2C5F3D]" : "bg-[#D8D5C4]"}`}>
+              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${voice ? "translate-x-[18px]" : "translate-x-0.5"}`} />
+            </button>
+          </div>
+          <div className="flex items-center justify-between py-3 border-b border-[#E4E2D6]">
+            <div className="flex items-center gap-2.5 text-[13.5px] text-[#3A4A3D]"><Wifi size={16} /> Low-data mode</div>
+            <button onClick={() => setDataSaver((v) => !v)} className={`w-10 h-6 rounded-full relative transition-colors ${dataSaver ? "bg-[#2C5F3D]" : "bg-[#D8D5C4]"}`}>
+              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${dataSaver ? "translate-x-[18px]" : "translate-x-0.5"}`} />
+            </button>
+          </div>
+          <div className="flex items-center justify-between py-3">
+            <div className="flex items-center gap-2.5 text-[13.5px] text-[#3A4A3D]"><Shield size={16} /> Data stored securely</div>
+            <Check size={16} className="text-[#2C5F3D]" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================= App Root ================= */
+function App() {
+  useFonts();
+  const [screen, setScreen] = useState("splash");
+  const [lang, setLang] = useState("en");
+  const [online, setOnline] = useState(true);
+  const [voice, setVoice] = useState(true);
+  const [activeTab, setActiveTab] = useState("dashboard");
+  const [showProfile, setShowProfile] = useState(false);
+  const [farmer, setFarmer] = useState(null);
+  const [farm, setFarm] = useState(null);
+  const [selectedCell, setSelectedCell] = useState(null);
+  const [droneRequest, setDroneRequest] = useState(null);
+  const [reports, setReports] = useState([]);
+  const [alerts, setAlerts] = useState(initialAlerts);
+
+  const t = STR[lang];
+  const field = useMemo(() => genField(21), []);
+  const unread = alerts.filter((a) => !a.read).length;
+  const stats = { health: 78 };
+
+  if (screen === "splash") return <Splash t={t} onStart={() => setScreen("login")} />;
+  if (screen === "login") return <Login t={t} onDone={(d) => { setFarmer(d); setScreen("setup"); }} />;
+  if (screen === "setup") return <FarmSetup t={t} onDone={(f) => { setFarm(f); setScreen("app"); }} />;
+
+  function requestDrone(cell) {
+    setDroneRequest({ cell, step: 0 });
+    setActiveTab("drone");
+    setSelectedCell(null);
+  }
+
+  return (
+    <div className="min-h-screen bg-[#EEF2ED] font-['Inter']">
+      <style>{`
+        .no-scrollbar::-webkit-scrollbar{display:none}
+        .no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}
+        * { font-family: 'Inter', sans-serif; }
+      `}</style>
+      <Header t={t} lang={lang} setLang={setLang} online={online} setOnline={setOnline}
+        unread={unread} onProfile={() => setShowProfile(true)} onAlerts={() => setActiveTab("alerts")} farm={farm} />
+      <TopTabs active={activeTab} setActive={setActiveTab} t={t} />
+
+      {activeTab === "dashboard" && <Dashboard t={t} field={field} onOpenCell={setSelectedCell} onGo={setActiveTab} stats={stats} farm={farm} />}
+      {activeTab === "map" && <MapScreen field={field} onOpenCell={setSelectedCell} t={t} />}
+      {activeTab === "irrigation" && <IrrigationScreen t={t} />}
+      {activeTab === "pest" && <PestScreen t={t} />}
+      {activeTab === "weather" && <WeatherScreen t={t} />}
+      {activeTab === "satellite" && <SatelliteScreen t={t} />}
+      {activeTab === "drone" && <DroneScreen t={t} request={droneRequest} setRequest={setDroneRequest} />}
+      {activeTab === "damage" && <DamageScreen t={t} reports={reports} addReport={(r) => setReports((p) => [r, ...p])} online={online} />}
+      {activeTab === "alerts" && <AlertsScreen t={t} lang={lang} alerts={alerts} setAlerts={setAlerts} voice={voice} setVoice={setVoice} />}
+
+      <CellDrawer cell={selectedCell} onClose={() => setSelectedCell(null)} t={t} onRequestDrone={requestDrone} />
+      {showProfile && <ProfileScreen t={t} lang={lang} setLang={setLang} voice={voice} setVoice={setVoice} farm={farm} onClose={() => setShowProfile(false)} />}
+
+      <div className="text-center py-6 text-[11px] text-[#9CA79E] font-mono">
+        🌾 {t.appName} — {t.subtag}
+      </div>
+    </div>
+  );
+}
+
+try {
+  const rootEl = document.getElementById("root");
+  const root = ReactDOM.createRoot(rootEl);
+  root.render(<App />);
+  const boot = document.getElementById("kd-boot");
+  if (boot) boot.remove();
+} catch (err) {
+  const box = document.getElementById("kd-error");
+  const boot = document.getElementById("kd-boot");
+  if (boot) boot.remove();
+  if (box) {
+    box.style.display = "block";
+    box.textContent = "Khet Drishti failed to render.\n\n" + (err && err.stack ? err.stack : err);
+  }
+  console.error(err);
+}
+</script>
+</body>
+</html>
